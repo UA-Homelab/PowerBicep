@@ -1,4 +1,5 @@
 
+
 # PowerBicep PowerShell Module
 
 The **PowerBicep** module provides advanced functions for deploying and managing Azure resources using Bicep templates, including automated subnet allocation, hub-spoke network topologies, and more.
@@ -16,6 +17,55 @@ Import-Module ./PowerBicep.psm1
 ```
 
 ## Cmdlets
+
+### New-PBIsolatedVirtualNetwork
+
+Creates an isolated virtual network with automated subnet allocation and input validation.
+
+#### Syntax
+
+```powershell
+New-PBIsolatedVirtualNetwork
+    -ApplicationNameShort <string>
+    -Environment <string>
+    -Location <string>
+    -AddressPrefix <string>
+    [-Index <string>]
+    [-Tags <object>]
+    [-Subnets <hashtable>]
+    [-NamingConventionOption <int>]
+    [-DenyManualChanges]
+    [-Force]
+    [-AcceptOverlappingIpAddresses]
+```
+
+#### Description
+
+Creates an isolated VNet in Azure, allocates subnets from the specified address prefix, and performs input validation for all parameters. Supports deployment stacks and advanced scenarios.
+
+#### Parameters
+
+| Name                        | Type      | Description                                                                                  | Required | Default         |
+|-----------------------------|-----------|----------------------------------------------------------------------------------------------|----------|-----------------|
+| ApplicationNameShort        | string    | Short name for the application.                                                              | Yes      |                 |
+| Environment                 | string    | Environment name (e.g., dev, prod).                                                          | Yes      |                 |
+| Location                    | string    | Azure region.                                                                                | Yes      |                 |
+| AddressPrefix               | string    | VNet address prefix (e.g., 192.168.0.0/24).                                                  | Yes      |                 |
+| Index                       | string    | Resource index.                                                                              | No       | '001'           |
+| Tags                        | object    | Tags to apply to resources.                                                                  | No       | @{}             |
+| Subnets                     | hashtable | Subnet definitions (e.g., @{subnet1=26; subnet2=27}).                                       | No       | @{}             |
+| NamingConventionOption      | int       | Naming convention option.                                                                    | No       | 1               |
+| DenyManualChanges           | switch    | Deny manual changes to resources.                                                            | No       |                 |
+| Force                       | switch    | Forces deployment using deployment stack.                                                    | No       |                 |
+| AcceptOverlappingIpAddresses| switch    | Allow overlapping IP address spaces.                                                         | No       |                 |
+
+#### Examples
+
+```powershell
+New-PBIsolatedVirtualNetwork -ApplicationNameShort 'app' -Environment 'test' -Location 'northeurope' -AddressPrefix '10.1.0.0/16' -Subnets @{subnet1=26; subnet2=27} -Verbose
+```
+
+---
 
 ### New-PBSpokeVirtualNetwork
 
