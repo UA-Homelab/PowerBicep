@@ -229,3 +229,4 @@ output resourceGroupName string = resourceGroup().name
 output subscriptionId string = subscription().id
 output tags object = virtualNetwork.tags
 output subnets array = virtualNetwork.properties.subnets
+output firewallPrivateIp string = '192.168.0.196'

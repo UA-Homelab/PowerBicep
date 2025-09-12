@@ -12,6 +12,33 @@ function New-RandomNumber {
     Get-Random -Minimum 1000 -Maximum 9999 -SetSeed $intValue
 }
 
+function New-PBResourceGroupName {
+    param (
+        [string]$ApplicationNameShort,
+        [string]$Environment,
+        [string]$Location,
+        [string]$Index = "001",
+        [switch]$NetworkResourceGroup,
+        [int]$NamingConventionOption = 1
+    )
+
+    $ResourceType = "Microsoft.Resources/resourceGroups"
+
+    $resourceNameShortcuts = Get-Content -Path "../lib/resourceNameShortcuts.json" | ConvertFrom-Json -AsHashtable
+
+    $resourceNameShort = $resourceNameShortcuts.$ResourceType
+
+    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShort = $locationShortcutList.$Location
+
+    if ($NetworkResourceGroup) {
+        $resourceName = "$resourceNameShort-network-$ApplicationNameShort-$Environment-$locationShort-$Index"
+    } else {
+        $resourceName = "$resourceNameShort-$ApplicationNameShort-$Environment-$locationShort-$Index"
+    }
+
+    return $resourceName
+}
 
 function New-PBResourceName {
     param (

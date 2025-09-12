@@ -5,15 +5,19 @@ param name string
 param addressPrefix string
 param tags object = {}
 param subnets object[] = []
-param nextHopType string = nextHopDefaultRouteIP != '' ? 'VirtualAppliance' : 'Internet'
-param nextHopDefaultRouteIP string = ''
+param nextHopType string = 'VirtualAppliance'
+param nextHopDefaultRouteIP string
 param customRoutes object[] = []
-param connectToHubNetwork bool
+param hubVnetId string = ''
+param hubHasVpnGateway bool 
 
+var hubResourceGroup = length(split(hubVnetId, '/')) >= 5 ? split(hubVnetId, '/')[4] : ''
+var hubSubscriptionId = length(split(hubVnetId, '/')) >= 3 ? split(hubVnetId, '/')[2] : ''
 var nsgName = 'default-nsg-${name}'
 var routeTableName = 'default-rt-${name}'
 var publicIpNatGatewayName = 'pip-natgw-${name}'
 var natGatewayName = 'natgw-${name}'
+var createRouteTable = (nextHopDefaultRouteIP != '') ? true : false
 
 resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' = {
   name: nsgName
@@ -21,7 +25,7 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-0
   properties: {}
 }
 
-resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = {
+resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (createRouteTable) {
   name: routeTableName
   location: location
   tags: tags
@@ -30,7 +34,7 @@ resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = {
   }
 }
 
-resource publicIpNatGateway 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (!connectToHubNetwork) {
+resource publicIpNatGateway 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (!createRouteTable){
   name: publicIpNatGatewayName
   location: location
   sku: {
@@ -45,7 +49,7 @@ resource publicIpNatGateway 'Microsoft.Network/publicIPAddresses@2024-07-01' = i
   }
 }
 
-resource natGateway 'Microsoft.Network/natGateways@2024-07-01' = if (!connectToHubNetwork) {
+resource natGateway 'Microsoft.Network/natGateways@2024-07-01' = if (!createRouteTable) {
   name: natGatewayName
   location: location
   sku: {
@@ -60,16 +64,13 @@ resource natGateway 'Microsoft.Network/natGateways@2024-07-01' = if (!connectToH
   }
 }
 
-resource routeTableRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = {
+resource routeTableRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (createRouteTable) {
   parent: routeTable
   name: 'default-route'
-  properties: nextHopDefaultRouteIP != '' ? {
+  properties: {
     addressPrefix: '0.0.0.0/0'
     nextHopType: nextHopType
     nextHopIpAddress: nextHopDefaultRouteIP
-  } : {
-    addressPrefix: '0.0.0.0/0'
-    nextHopType: 'Internet'
   }
 }
 
@@ -104,11 +105,37 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2019-11-01' = {
         networkSecurityGroup: {
           id: networkSecurityGroup.id
         }
-        natGateway: !connectToHubNetwork ? {
+        natGateway: (!createRouteTable) ? {
           id: natGateway.id
         } : null
       }
     }]
+  }
+}
+
+module vnetPeeringToHub 'peering.bicep' = {
+  name: 'Deploy-Peering-1'
+  params: {
+    peeringName: 'peering-to-hub-${location}'
+    sourceVirtualNetworkName: name
+    remoteVirtualNetworkId: hubVnetId
+    allowGatewayTransit: false
+    useRemoteGateways: hubHasVpnGateway
+  }
+  dependsOn: [
+    virtualNetwork
+  ]
+}
+
+module vnetPeeringFromHub 'peering.bicep' =  {
+  name: 'Deploy-Peering-2'
+  scope: resourceGroup(hubSubscriptionId, hubResourceGroup)
+  params: {
+    peeringName: 'peering-to-${name}'
+    sourceVirtualNetworkName: last(split(hubVnetId, '/'))
+    remoteVirtualNetworkId: virtualNetwork.id
+    allowGatewayTransit: hubHasVpnGateway
+    useRemoteGateways: false
   }
 }
 

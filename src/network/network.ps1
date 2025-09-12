@@ -1,8 +1,11 @@
 . $PSScriptRoot/../basics/basics.ps1
+. $PSScriptRoot/../shared/errorHandlingNetworking.ps1
+. $PSScriptRoot/../shared/errorHandlingBasics.ps1
 
 $global:vnetAddressPrefix = ""
 $global:availableCIDRs = [System.Collections.ArrayList]@()
 $global:usedRanges = [System.Collections.ArrayList]@()
+$global:removedExistingSubnets = $false
 function IpIntToString($ipInt) {
     $bytes = [BitConverter]::GetBytes([uint32]$ipInt)
     [Array]::Reverse($bytes)
@@ -39,25 +42,85 @@ function Split-IpRangeToCIDRs {
 }
 function Get-NextCIDRBlock {
     param (
+        [string]$resourceGroupName,
+        [string]$virtualNetworkName,
+        [string]$subnetName,
         [int]$minimumSubnetMask
     )
+
+    $checkIfVnetExists = Search-AzGraph -Query "resources
+        | where type == 'microsoft.network/virtualnetworks'
+        | where subscriptionId == '$((Get-AzContext).Subscription.Id)'
+        | where resourceGroup  == '$resourceGroupName'
+        | where name == '$virtualNetworkName'"
+
+    if ($checkIfVnetExists) {
+        Write-Verbose "Subnet '$subnetName' already exists in virtual network '$virtualNetworkName'."
+
+        $allExistingSubnets = $checkIfVnetExists.properties.subnets
+
+        if ($allExistingSubnets) {
+            Write-Verbose "Found existing subnets in virtual network '$virtualNetworkName'"
+
+            foreach ($subnet in $allExistingSubnets) {
+                if (-not $global:removedExistingSubnets){
+                    Write-Verbose "Remove existing Subnet $($subnet.name) with CIDR $($subnet.properties.addressPrefix) from available ranges."
+                    $cidr = $subnet.properties.addressPrefix
+                    $global:usedRanges.Add($cidr)
+
+                    $cidrParts = $cidr -split "/"
+                    $networkAddress = $cidrParts[0]
+                    $mask = [int]$cidrParts[1]
+                    $startIp = IpStringToInt($networkAddress)
+                    $endIp = $startIp + [math]::Pow(2, 32 - $mask) - 1
+
+                    for ($j = 0; $j -lt $global:availableCIDRs.Count; $j++) {
+                        $availableCidrParts = $global:availableCIDRs[$j] -split "/"
+                        $availableNetworkAddress = $availableCidrParts[0]
+                        $availableMask = [int]$availableCidrParts[1]
+                        $availableStartIp = IpStringToInt($availableNetworkAddress)
+                        $availableEndIp = $availableStartIp + [math]::Pow(2, 32 - $availableMask) - 1
+
+                        if ($startIp -ge $availableStartIp -and $endIp -le $availableEndIp) {
+                            $global:availableCIDRs.RemoveAt($j)
+                            if ($startIp -gt $availableStartIp) {
+                                $beforeCIDRs = Split-IpRangeToCIDRs -startIp $availableStartIp -endIp ($startIp - 1)
+                                foreach ($beforeCidr in $beforeCIDRs) { $global:availableCIDRs.Add([string]$beforeCidr) }
+                            }
+                            if ($endIp -lt $availableEndIp) {
+                                $afterCIDRs = Split-IpRangeToCIDRs -startIp ($endIp + 1) -endIp $availableEndIp
+                                foreach ($afterCidr in $afterCIDRs) { $global:availableCIDRs.Add([string]$afterCidr) }
+                            }
+                            break
+                        }
+                    }
+                } 
+                
+                if ($subnetName -eq $subnet.name) {
+                    return $subnet.properties.addressPrefix
+                }
+            }
+            Write-Verbose "Available CIDRs after removing existing subnets: $global:availableCIDRs"
+            $global:removedExistingSubnets = $true 
+        }  
+    }
 
     for ($i = 0; $i -lt $global:availableCIDRs.Count; $i++) {
 
         $cidrParts = $global:availableCIDRs[$i] -split "/"
         $cidrNetworkAddress = $cidrParts[0]
-        Write-Verbose "CIDR Network Address: $cidrNetworkAddress"
         $cidrMask = [int]$cidrParts[1]
 
         $availableCIDRStartIp = [uint32](IpStringToInt($cidrNetworkAddress))
         $availableCIDREndIp = [uint32]($availableCIDRStartIp + [math]::Pow(2, 32 - $cidrMask) - 1)
+
         if ($cidrMask -le $minimumSubnetMask) {
-            # Always construct CIDR block as a string
+            $global:availableCIDRs.RemoveAt($i)
             $cidrBlock = "$cidrNetworkAddress/$minimumSubnetMask"
             $allocatedStart = [uint32]$availableCIDRStartIp
             $allocatedEnd = [uint32]($allocatedStart + [math]::Pow(2, 32 - $minimumSubnetMask) - 1)
 
-            $global:availableCIDRs.RemoveAt($i)
+            #$global:availableCIDRs.RemoveAt($i)
             Write-Verbose "Removed $cidrNetworkAddress/$cidrMask from Available CIDRs"
 
             $global:usedRanges.Add($cidrBlock)
@@ -73,7 +136,6 @@ function Get-NextCIDRBlock {
 
             Write-Verbose "Available CIDRs after allocation: $($global:availableCIDRs -join ', ')"
 
-            Write-Verbose "Check CIDR Block before Return: $cidrBlock"
             return $cidrBlock
 
         } elseif ($i -eq ($global:availableCIDRs.Count - 1)) {
@@ -86,19 +148,17 @@ function New-PBHubVirtualNetwork {
         [Parameter(ParameterSetName = "Default")]
         [string]$ApplicationNameShort = "hub",
 
+        [ValidateSet("Prod", "Dev", "Test", "Staging", "QA", "Sandbox")]
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
         [string]$Environment,
 
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
         [string]$Location,
 
-        # [ValidatePattern('^([0-9]{1,3}\.){3}[0-9]{1,3}/[2-25]{1,2}$')]
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
         [string]$AddressPrefix,
 
-        # [Parameter(ParameterSetName = "Default")]
-        # [hashtable]$Subnets = @{},
-
+        [ValidatePattern('^(0[0-9]{2}|[1-9][0-9]{2})$')]
         [Parameter(ParameterSetName = "Default")]
         [string]$Index = "001",
 
@@ -126,23 +186,27 @@ function New-PBHubVirtualNetwork {
 
         [ValidateSet("Basic", "Standard", "Premium")]
         [Parameter(ParameterSetName = "Default")]
-        [string]$AzureBastionSku = "Basic",
+        [string]$AzureBastionSku,
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$DeployEntraPrivateAccess,
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$DeployAzureVpnGateway
-
     )
 
-    # Reset globals for each new VNet deployment
+    #Input validation
+    try {
+        Test-LocationName -Location $Location | Out-Null
+        Test-VirtualNetworkAddressPrefix -AddressPrefix $AddressPrefix | Out-Null
+    } catch {
+        throw "Error: $_"
+    }
+
     $global:vnetAddressPrefix = $AddressPrefix
     $global:availableCIDRs = [System.Collections.ArrayList]@()
     $global:usedRanges = [System.Collections.ArrayList]@()
-
-    Write-Verbose "VNet Address Prefix: $global:vnetAddressPrefix"
-    $global:availableCIDRs.Add($global:vnetAddressPrefix)
+    $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
 
     $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     
@@ -152,10 +216,24 @@ function New-PBHubVirtualNetwork {
 
     $resourceGroupName = New-PBResourceName -ResourceType "Microsoft.Resources/resourceGroups" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
 
+    Write-Verbose "Checking for overlapping VNets with Address Prefix '$AddressPrefix'"
+    $overlappingVirtualNetworks = Search-AzGraph -Query "resources
+        | where type == 'microsoft.network/virtualnetworks'
+        | where name != '$virtualNetworkName'
+        | where properties.addressSpace.addressPrefixes contains '$AddressPrefix'"
+
+    if (-not $AcceptOverlappingIpAddresses) {
+        try {
+            Test-OverlappingIpAddressPrefixes -VirtualNetworkName $virtualNetworkName -AddressPrefix $AddressPrefix | Out-Null
+        } catch {
+            throw "Error: $_"
+        }
+    }
+
     $Tags.add("HubVNET", "True")
 
     [hashtable]$subnets = @{}
-    if ($true) {
+    if ($DeployAzureFirewall) {
         $subnets.Add("AzureFirewallSubnet", 26)
         $subnets.Add("AzureFirewallManagementSubnet", 26)
     }
@@ -177,6 +255,7 @@ function New-PBHubVirtualNetwork {
     [array]$subnetsObjectArray = @()
 
     $sortedSubnets = $Subnets.GetEnumerator() | Sort-Object -Property Value
+
     foreach ($subnet in $sortedSubnets) {
         $subnetName = $subnet.Key
         $subnetMask = $subnet.Value
@@ -193,6 +272,31 @@ function New-PBHubVirtualNetwork {
 
         $subnetsObjectArray += $subnetObject
     }
+
+    if ($DeployAzureVpnGateway) {
+        $Tags.add("VpnGateway", "True")
+    }
+
+    if ($DeployAzureFirewall) {
+        $azureFirewallSubnetObject = $subnetsObjectArray | Where-Object { $_.name -eq "AzureFirewallSubnet" }
+        Write-Verbose "AzureFirewallSubnet found with address prefix: $($azureFirewallSubnetObject.addressPrefix)"
+        $azureFirewallSubnetNetworkAddress = $azureFirewallSubnetObject.addressPrefix.Split("/")[0]
+        Write-Verbose "AzureFirewallSubnet network address: $azureFirewallSubnetNetworkAddress"
+
+        $azureFirewallPrivateIpInt = (IpStringToInt($azureFirewallSubnetNetworkAddress)) + 4
+        $azureFirewallPrivateIp = IpIntToString($azureFirewallPrivateIpInt)
+
+        $Tags.add("AzFirewall", "True")
+        $Tags.add("AzFirewallPrivateIp", $azureFirewallPrivateIp)
+    }
+
+    if ($DeployAzureBastion) {
+        $Tags.add("Bastion", "True")
+    }
+
+    if ($DeployEntraPrivateAccess) {
+        $Tags.add("EntraPrivateAccess", "True")
+    }
     
     $resourceGroup = New-AzSubscriptionDeployment `
         -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
@@ -208,7 +312,7 @@ function New-PBHubVirtualNetwork {
     $virtualNetwork = New-AzResourceGroupDeploymentStack `
         -ResourceGroupName $resourceGroup.Outputs.name.value `
         -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./network/hub_vnet.bicep" `
+        -TemplateFile "./network/bicep/hub_vnet.bicep" `
         -TemplateParameterObject @{
             location = $Location
             name = $virtualNetworkName
@@ -252,73 +356,57 @@ function New-PBHubVirtualNetwork {
 function New-PBSpokeVirtualNetwork {
     param (
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
-        [Parameter(ParameterSetName = "HubConnection", Mandatory = $true)]
         [string]$ApplicationNameShort,
 
+        [ValidateSet("Prod", "Dev", "Test", "Staging", "QA", "Sandbox")]
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
-        [Parameter(ParameterSetName = "HubConnection", Mandatory = $true)]
         [string]$Environment,
 
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
-        [Parameter(ParameterSetName = "HubConnection", Mandatory = $true)]
         [string]$Location,
 
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
-        [Parameter(ParameterSetName = "HubConnection", Mandatory = $true)]
-        [ValidatePattern('^([0-9]{1,3}\.){3}[0-9]{1,3}/25$')]
-        [ValidateScript({
-            $parts = $_ -split '/'
-            if ($parts.Count -ne 2 -or $parts[1] -ge '30' -or $parts[1] -lt '2') { return $false }
-            $ip = $parts[0] -split '\.'
-            if ($ip[0] -eq '10') { return $true }
-            if ($ip[0] -eq '192' -and $ip[1] -eq '168') { return $true }
-            if ($ip[0] -eq '172' -and [int]$ip[1] -ge 16 -and [int]$ip[1] -le 31) { return $true }
-            return $false
-        })]
         [string]$AddressPrefix,
 
+        [ValidatePattern('^(0[0-9]{2}|[1-9][0-9]{2})$')]
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName = "HubConnection")]
         [string]$Index = "001",
 
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName = "HubConnection")]
         [object]$Tags = @{},
 
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName = "HubConnection")]
+        
         [hashtable]$Subnets = @{},
 
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName = "HubConnection")]
         [int]$NamingConventionOption = 1,
 
-        [Parameter(ParameterSetName="HubConnection", Mandatory=$true)]
-        [string]$NextHopDefaultRouteIP,
-
-        [Parameter(ParameterSetName="HubConnection")]
-        [switch]$ConnectToHubNetwork,
-
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName="HubConnection")]
-        [string]$NextHopType = "VirtualAppliance",
-
-        [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName="HubConnection")]
         [switch]$DenyManualChanges,
 
         [Parameter(ParameterSetName = "Default")]
-        [Parameter(ParameterSetName="HubConnection")]
-        [switch]$Force
+        [switch]$Force,
+
+        [Parameter(ParameterSetName = "Default")]
+        [switch]$AcceptOverlappingIpAddresses
     )
 
-    # Reset globals for each new VNet deployment
+    #Input validation
+    try {
+        Test-ApplicationNameShort -ApplicationNameShort $ApplicationNameShort | Out-Null
+        Test-SubnetConfiguration -Subnets $Subnets | Out-Null
+        Test-LocationName -Location $Location | Out-Null
+        Test-VirtualNetworkAddressPrefix -AddressPrefix $AddressPrefix | Out-Null
+
+    } catch {
+        throw "Error: $_"
+    }
+
     $global:vnetAddressPrefix = $AddressPrefix
     $global:availableCIDRs = [System.Collections.ArrayList]@()
     $global:usedRanges = [System.Collections.ArrayList]@()
-
-    Write-Verbose "VNet Address Prefix: $global:vnetAddressPrefix"
-    $global:availableCIDRs.Add($global:vnetAddressPrefix)
+    $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
 
     $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     
@@ -326,8 +414,27 @@ function New-PBSpokeVirtualNetwork {
 
     $virtualNetworkName = New-PBResourceName -ResourceType "Microsoft.Network/virtualNetworks" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
 
-    $resourceGroupName = New-PBResourceName -ResourceType "Microsoft.Resources/resourceGroups" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
+    $resourceGroupName = New-PBResourceGroupName -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index -NetworkResourceGroup
 
+    if (-not $AcceptOverlappingIpAddresses) {
+        try {
+            Test-OverlappingIpAddressPrefixes -VirtualNetworkName $virtualNetworkName -AddressPrefix $AddressPrefix | Out-Null
+        } catch {
+            throw "Error: $_"
+        }
+    }
+
+    Write-Verbose "Checking for Hub VNet in location '$Location'"
+
+    $hubVnet = Search-AzGraph -Query "resources
+        | where tags.HubVNET == 'True'
+        | where location == '$Location'"
+
+    if ($hubVnet.location -eq $null) {
+        throw "No Hub network found in location '$Location'. Please deploy a Hub network first using 'New-PBHubNetwork' and retry the deployment."
+    }
+
+    Write-Verbose "Creating Resource Group '$resourceGroupName'"
     $resourceGroup = New-AzSubscriptionDeployment `
         -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
         -Location $Location `
@@ -337,15 +444,15 @@ function New-PBSpokeVirtualNetwork {
             location = $Location
             tags = $Tags
         }
-
+    
     [array]$subnetsObjectArray = @()
-
+    
     $sortedSubnets = $Subnets.GetEnumerator() | Sort-Object -Property Value
     foreach ($subnet in $sortedSubnets) {
         $subnetName = $subnet.Key
         $subnetMask = $subnet.Value
 
-        $cidrBlock = [string](Get-NextCIDRBlock -minimumSubnetMask $subnetMask)
+        $cidrBlock = [string](Get-NextCIDRBlock -resourceGroupName $resourceGroupName -virtualNetworkName $virtualNetworkName -subnetName $subnetName -minimumSubnetMask $subnetMask)
         $cidrBlockSplit = $cidrBlock -split ' '
         $cidrBlock = $cidrBlockSplit[$cidrBlockSplit.Length - 1]
 
@@ -357,40 +464,185 @@ function New-PBSpokeVirtualNetwork {
 
         $subnetsObjectArray += $subnetObject
     }
-
+    
     if ($Force) {
-    $virtualNetwork = New-AzResourceGroupDeploymentStack `
-        -ResourceGroupName $resourceGroup.Outputs.name.value `
-        -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./network/spoke_vnet.bicep" `
-        -TemplateParameterObject @{
-            location = $Location
-            name = $virtualNetworkName
-            addressPrefix = $AddressPrefix
-            tags = $Tags
-            subnets = $subnetsObjectArray
-            connectToHubNetwork = ($ConnectToHubNetwork ? $true : $false)
-            nextHopDefaultRouteIP = $NextHopDefaultRouteIP
-        } `
-        -ActionOnUnmanage "DeleteAll" `
-        -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
-        -Force
-    } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
             -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./network/spoke_vnet.bicep" `
+            -TemplateFile "./network/bicep/spoke_vnet.bicep" `
             -TemplateParameterObject @{
                 location = $Location
                 name = $virtualNetworkName
                 addressPrefix = $AddressPrefix
                 tags = $Tags
                 subnets = $subnetsObjectArray
-                connectToHubNetwork = ($ConnectToHubNetwork ? $true : $false)
+                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : $nextHopDefaultRouteIP
+                hubVnetId = $hubVnet.id
+                hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
+            } `
+            -ActionOnUnmanage "DeleteAll" `
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -Force
+    } else {
+        $virtualNetwork = New-AzResourceGroupDeploymentStack `
+            -ResourceGroupName $resourceGroup.Outputs.name.value `
+            -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
+            -TemplateFile "./network/bicep/spoke_vnet.bicep" `
+            -TemplateParameterObject @{
+                location = $Location
+                name = $virtualNetworkName
+                addressPrefix = $AddressPrefix
+                tags = $Tags
+                subnets = $subnetsObjectArray
+                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : $nextHopDefaultRouteIP
+                hubVnetId = $hubVnet.id
+                hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
             } `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
     }
-    return $virtualNetwork
+
+    $virtualNetworkPSObject = Get-AzVirtualNetwork -Name $virtualNetwork.Outputs.name.value -ResourceGroupName $resourceGroup.Outputs.name.value
+
+    return $virtualNetworkPSObject
+
+}
+
+function New-PBIsolatedVirtualNetwork {
+    param (
+        [Parameter(ParameterSetName = "Default", Mandatory = $true)]
+        [string]$ApplicationNameShort,
+
+        [ValidateSet("Prod", "Dev", "Test", "Staging", "QA", "Sandbox")]
+        [Parameter(ParameterSetName = "Default", Mandatory = $true)]
+        [string]$Environment,
+
+        [Parameter(ParameterSetName = "Default", Mandatory = $true)]
+        [string]$Location,
+
+        [Parameter(ParameterSetName = "Default", Mandatory = $true)]
+        [string]$AddressPrefix,
+
+        [ValidatePattern('^(0[0-9]{2}|[1-9][0-9]{2})$')]
+        [Parameter(ParameterSetName = "Default")]
+        [string]$Index = "001",
+
+        [Parameter(ParameterSetName = "Default")]
+        [object]$Tags = @{},
+
+        [Parameter(ParameterSetName = "Default")]
+        
+        [hashtable]$Subnets = @{},
+
+        [Parameter(ParameterSetName = "Default")]
+        [int]$NamingConventionOption = 1,
+
+        [Parameter(ParameterSetName = "Default")]
+        [switch]$DenyManualChanges,
+
+        [Parameter(ParameterSetName = "Default")]
+        [switch]$Force,
+
+        [Parameter(ParameterSetName = "Default")]
+        [switch]$AcceptOverlappingIpAddresses
+    )
+
+    #Input validation
+    try {
+        Test-ApplicationNameShort -ApplicationNameShort $ApplicationNameShort | Out-Null
+        Test-SubnetConfiguration -Subnets $Subnets | Out-Null
+        Test-LocationName -Location $Location | Out-Null
+        Test-VirtualNetworkAddressPrefix -AddressPrefix $AddressPrefix | Out-Null
+
+    } catch {
+        throw "Error: $_"
+    }
+
+    $global:vnetAddressPrefix = $AddressPrefix
+    $global:availableCIDRs = [System.Collections.ArrayList]@()
+    $global:usedRanges = [System.Collections.ArrayList]@()
+    $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
+
+    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    
+    $locationShort = $locationShortcutList.$Location
+
+    $virtualNetworkName = New-PBResourceName -ResourceType "Microsoft.Network/virtualNetworks" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
+
+    $resourceGroupName = New-PBResourceGroupName -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index -NetworkResourceGroup
+
+    if (-not $AcceptOverlappingIpAddresses) {
+        try {
+            Test-OverlappingIpAddressPrefixes -VirtualNetworkName $virtualNetworkName -AddressPrefix $AddressPrefix | Out-Null
+        } catch {
+            throw "Error: $_"
+        }
+    }
+    
+    Write-Verbose "Creating Resource Group '$resourceGroupName'"
+    $resourceGroup = New-AzSubscriptionDeployment `
+        -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
+        -Location $Location `
+        -TemplateFile "./resourceContainer/resource_group.bicep" `
+        -TemplateParameterObject @{
+            name = $resourceGroupName
+            location = $Location
+            tags = $Tags
+        }
+    
+    [array]$subnetsObjectArray = @()
+    
+    $sortedSubnets = $Subnets.GetEnumerator() | Sort-Object -Property Value
+    foreach ($subnet in $sortedSubnets) {
+        $subnetName = $subnet.Key
+        $subnetMask = $subnet.Value
+
+        $cidrBlock = [string](Get-NextCIDRBlock -resourceGroupName $resourceGroupName -virtualNetworkName $virtualNetworkName -subnetName $subnetName -minimumSubnetMask $subnetMask)
+        $cidrBlockSplit = $cidrBlock -split ' '
+        $cidrBlock = $cidrBlockSplit[$cidrBlockSplit.Length - 1]
+
+
+        $subnetObject = @{
+            name = $subnetName
+            addressPrefix = $cidrBlock
+        }
+
+        $subnetsObjectArray += $subnetObject
+    }
+    
+    if ($Force) {
+        $virtualNetwork = New-AzResourceGroupDeploymentStack `
+            -ResourceGroupName $resourceGroup.Outputs.name.value `
+            -Name "deploy-$ApplicationNameShort-vnet-$locationShort" `
+            -TemplateFile "./network/bicep/isolated_vnet.bicep" `
+            -TemplateParameterObject @{
+                location = $Location
+                name = $virtualNetworkName
+                addressPrefix = $AddressPrefix
+                tags = $Tags
+                subnets = $subnetsObjectArray
+            } `
+            -ActionOnUnmanage "DeleteAll" `
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -Force
+    } else {
+        $virtualNetwork = New-AzResourceGroupDeploymentStack `
+            -ResourceGroupName $resourceGroup.Outputs.name.value `
+            -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
+            -TemplateFile "./network/bicep/isolated_vnet.bicep" `
+            -TemplateParameterObject @{
+                location = $Location
+                name = $virtualNetworkName
+                addressPrefix = $AddressPrefix
+                tags = $Tags
+                subnets = $subnetsObjectArray
+            } `
+            -ActionOnUnmanage "DeleteAll" `
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+    }
+
+    $virtualNetworkPSObject = Get-AzVirtualNetwork -Name $virtualNetwork.Outputs.name.value -ResourceGroupName $resourceGroup.Outputs.name.value
+
+    return $virtualNetworkPSObject
 
 }
