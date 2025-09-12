@@ -1,4 +1,6 @@
-
+> ⚠️ **WARNING: Work In Progress**
+>
+> This repository is currently under active development. The documentation is incomplete and subject to change. Features, code, and instructions may not work as intended. Use at your own risk!
 
 # PowerBicep PowerShell Module
 
