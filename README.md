@@ -13,8 +13,8 @@ This module enables you to leverage the advantages of deploying your infrastruct
 - [Installation](#installation)
     - [Prerequisities](#prerequisities)
     - [Instructions](#instructions)
-- [Cmdlets](#network-cmdlets)
-    - [Network](#network-cmdlets)
+- [Functions](#network-functions)
+    - [Network](#network-functions)
         - [New-PBIsolatedVirtualNetwork](#new-pbisolatedvirtualnetwork)
         - [New-PBSpokeVirtualNetwork](#new-pbspokevirtualnetwork)
         - [New-PBHubVirtualNetwork](#new-pbhubvirtualnetwork)
@@ -56,7 +56,7 @@ This module enables you to leverage the advantages of deploying your infrastruct
     Import-Module ./PowerBicep.psm1
     ```
 
-# Network cmdlets
+# Network functions
 
 ## New-PBIsolatedVirtualNetwork
 
