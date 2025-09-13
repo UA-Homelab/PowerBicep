@@ -8,6 +8,10 @@ param subnets object[] = []
 
 param deployAzureFirewall bool
 param azureFirewallSku string
+param allowOutboundInternetAccess bool
+param natRuleCollections array = []
+param networkRuleCollections array = []
+param applicationRuleCollections array = []
 
 param deployAzureBastion bool
 @allowed([
@@ -20,9 +24,90 @@ param deployEntraPrivateAccess bool
 param deployAzureVpnGateway bool
 
 var bastionNsgName = 'nsg-AzureBastionSubnet-${name}'
-var bastionPublicIpName = 'pip-bastion-${name}'
 var bastionName = 'bastion-${name}'
+var bastionPublicIpName = 'pip-${bastionName}'
 var bastionSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', name, 'AzureBastionSubnet')
+
+
+var azureFirewallName = 'fw-${name}'
+var azureFirewallPublicIpName = 'pip-${azureFirewallName}'
+var azureFirewallManagementPublicIpName = 'pip-mgmt-${azureFirewallName}'
+var azureFirewallPolicyName = 'policy-${azureFirewallName}'
+var azureFirewallSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', name, 'AzureFirewallSubnet')
+var azureFirewallManagementSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', name, 'AzureFirewallManagementSubnet')
+var microsoftKvmIps = [
+  '20.118.99.224'
+  '40.83.235.53'
+  '23.102.135.246' 
+]
+
+var azureFirewallApplicationRuleCollectionInternetAccess = {
+  ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+  action: {
+    type: 'Allow'
+  }
+  name: 'InternetAccess'
+  priority: 1000
+  rules: [
+    {
+      ruleType: 'ApplicationRule'
+      name: 'Allow443ToAnyFqdn'
+      protocols: [
+        {
+          protocolType: 'Https'
+          port: 443
+        }
+      ]
+      targetFqdns: [
+        '*'
+      ]
+      sourceAddresses: [
+        '*'
+      ]
+    }
+  ]
+}
+
+var azureFirewallNetworkRuleCollectionNecessaryServices = {
+  ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+  action: {
+    type: 'Allow'
+  }
+  name: 'NecessaryServices'
+  priority: 1000
+  rules: [
+    {
+      ruleType: 'NetworkRule'
+      name: 'Allow1688ToMicrosoftKMS'
+      ipProtocols: [
+        'TCP'
+      ]
+      destinationAddresses: microsoftKvmIps
+
+      sourceAddresses: [
+        '*'
+      ]
+      destinationPorts: [
+        '1688'
+      ]
+    }
+  ]
+}
+
+var azureFirewallNetworkRuleCollections = networkRuleCollections != [] ? flatten([
+  networkRuleCollections
+  [azureFirewallNetworkRuleCollectionNecessaryServices]
+]) : [
+  azureFirewallNetworkRuleCollectionNecessaryServices
+]
+
+var azureFirewallApplicationRuleCollections = (applicationRuleCollections != [] && allowOutboundInternetAccess) ? flatten([
+  applicationRuleCollections
+  [azureFirewallApplicationRuleCollectionInternetAccess]
+]) : allowOutboundInternetAccess ? [
+  azureFirewallApplicationRuleCollectionInternetAccess
+] : []
+
 
 resource bastionNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' = {
   name: bastionNsgName
@@ -222,6 +307,108 @@ resource bastionHost 'Microsoft.Network/bastionHosts@2024-07-01' =  if (deployAz
   ]
 }
 
+resource publicIpFirewall 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployAzureFirewall) {
+  name: azureFirewallPublicIpName
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    idleTimeoutInMinutes: 4
+  }
+}
+
+resource publicIpFirewallManagement 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployAzureFirewall) {
+  name: azureFirewallManagementPublicIpName
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    idleTimeoutInMinutes: 4
+  }
+}
+
+resource firewallPolicy 'Microsoft.Network/firewallPolicies@2021-05-01' = if (deployAzureFirewall) {
+  name: azureFirewallPolicyName
+  location: location
+  properties: {
+    sku: {
+      tier: azureFirewallSku
+    }
+  }
+}
+
+resource natRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2022-01-01' = if (deployAzureFirewall) {
+  parent: firewallPolicy
+  name: 'DefaultNatRuleCollectionGroup'
+  properties: {
+    priority: 200
+    ruleCollections: natRuleCollections
+  }
+}
+
+resource networkRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2022-01-01' = if (deployAzureFirewall) {
+  parent: firewallPolicy
+  name: 'DefaultNetworkRuleCollectionGroup'
+  properties: {
+    priority: 300
+    ruleCollections: azureFirewallNetworkRuleCollections
+  }
+}
+
+resource applicationRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2022-01-01' = if (deployAzureFirewall) {
+  parent: firewallPolicy
+  name: 'DefaultApplicationRuleCollectionGroup'
+  dependsOn: [
+    networkRuleCollectionGroup
+  ]
+  properties: {
+    priority: 400
+    ruleCollections: azureFirewallApplicationRuleCollections
+  }
+}
+
+resource firewall 'Microsoft.Network/azureFirewalls@2021-05-01' = if (deployAzureFirewall) {
+  name: azureFirewallName
+  location: location
+  properties: {
+    sku: {
+      name: 'AZFW_VNet'
+      tier: azureFirewallSku
+    }    
+    firewallPolicy: {
+      id: firewallPolicy.id
+    }
+    ipConfigurations: [
+      {
+        name: 'ipconfig'
+        properties: {
+          subnet: {
+            id: azureFirewallSubnetId
+          }
+          publicIPAddress: {
+            id: publicIpFirewall.id
+          }
+        }
+      }
+    ]
+    managementIpConfiguration: {
+      name: 'ipconfigManagement'
+      properties: {
+        publicIPAddress: {
+          id: publicIpFirewallManagement.id
+        }
+        subnet: {
+          id: azureFirewallManagementSubnetId
+        }
+      }
+    }
+  }
+}
+
 output id string = virtualNetwork.id
 output name string = virtualNetwork.name
 output addressPrefixes array = virtualNetwork.properties.addressSpace.addressPrefixes
@@ -230,4 +417,9 @@ output resourceGroupName string = resourceGroup().name
 output subscriptionId string = subscription().id
 output tags object = virtualNetwork.tags
 output subnets array = virtualNetwork.properties.subnets
-output firewallPrivateIp string = '192.168.0.196'
+output bastionId string = deployAzureBastion ? bastionHost.id : ''
+output bastionName string = deployAzureBastion ? bastionHost.name : ''
+output azureFirewallId string = deployAzureFirewall ? firewall.id : ''
+output azureFirewallName string = deployAzureFirewall ? firewall.name : ''
+output azureFirewallPrivateIp string = deployAzureFirewall ? firewall.properties.ipConfigurations[0].properties.privateIPAddress : ''
+

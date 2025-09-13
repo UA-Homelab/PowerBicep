@@ -113,6 +113,7 @@ New-PBHubVirtualNetwork
     [-Force]
     [-DeployAzureFirewall]
     [-AzureFirewallSku <string>]
+    [-AzureFirewallAllowOutboundInternetAccess]
     [-DeployAzureBastion]
     [-AzureBastionSku <string>]
     [-DeployAzureVpnGateway]
@@ -136,6 +137,7 @@ Creates a hub VNet in Azure, with options to deploy Azure Firewall, Bastion, VPN
 | Force                  | switch    | Forces deployment using deployment stack.                                                    | No       |                 |
 | DeployAzureFirewall    | switch    | Deploy Azure Firewall in the hub VNet.                                                       | No       |                 |
 | AzureFirewallSku       | string    | Azure Firewall SKU ('Basic', 'Standard', 'Premium').                                         | No       |                 |
+| AzureFirewallAllowOutboundInternetAccess | switch    | When set enables outbound access on Port 443 for all protected networks    | No       |                 |
 | DeployAzureBastion     | switch    | Deploy Azure Bastion in the hub VNet.                                                        | No       |                 |
 | AzureBastionSku        | string    | Azure Bastion SKU ('Basic', 'Standard', 'Premium').                                          | No       | 'Basic'         |
 | DeployAzureVpnGateway  | switch    | Deploy Azure VPN Gateway in the hub VNet.                                                    | No       |                 |

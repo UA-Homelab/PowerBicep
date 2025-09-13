@@ -6,11 +6,13 @@ $global:vnetAddressPrefix = ""
 $global:availableCIDRs = [System.Collections.ArrayList]@()
 $global:usedRanges = [System.Collections.ArrayList]@()
 $global:removedExistingSubnets = $false
+
 function IpIntToString($ipInt) {
     $bytes = [BitConverter]::GetBytes([uint32]$ipInt)
     [Array]::Reverse($bytes)
     return [System.Net.IPAddress]::new($bytes).ToString()
 }
+
 function IpStringToInt($ipString) {
     $ipBytes = [System.Net.IPAddress]::Parse($ipString).GetAddressBytes()
     if ([BitConverter]::IsLittleEndian) {
@@ -18,6 +20,7 @@ function IpStringToInt($ipString) {
     }
     return [BitConverter]::ToUInt32($ipBytes, 0)
 }
+
 function Split-IpRangeToCIDRs {
     param (
         [uint32]$startIp,
@@ -40,6 +43,7 @@ function Split-IpRangeToCIDRs {
 
     return $cidrs
 }
+
 function Get-NextCIDRBlock {
     param (
         [string]$resourceGroupName,
@@ -143,6 +147,7 @@ function Get-NextCIDRBlock {
         }
     }
 }
+
 function New-PBHubVirtualNetwork {
     param (
         [Parameter(ParameterSetName = "Default")]
@@ -180,6 +185,9 @@ function New-PBHubVirtualNetwork {
         [ValidateSet("Basic", "Standard", "Premium")]
         [Parameter(ParameterSetName = "Default")]
         [string]$AzureFirewallSku,
+
+        [Parameter(ParameterSetName = "Default")]
+        [switch]$AzureFirewallAllowOutboundInternetAccess,
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$DeployAzureBastion,
@@ -231,6 +239,8 @@ function New-PBHubVirtualNetwork {
     }
 
     $Tags.add("HubVNET", "True")
+    $Tags.add("Environment", $Environment)
+    $Tags.add("CreatedWith", "PowerBicep")
 
     [hashtable]$subnets = @{}
     if ($DeployAzureFirewall) {
@@ -325,6 +335,7 @@ function New-PBHubVirtualNetwork {
             deployAzureVpnGateway = ($DeployAzureVpnGateway ? $true : $false)
             azureFirewallSku = $AzureFirewallSku
             bastionSku = $AzureBastionSku
+            allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
         } `
         -ActionOnUnmanage "DeleteAll" `
         -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
@@ -346,6 +357,7 @@ function New-PBHubVirtualNetwork {
             deployAzureVpnGateway = ($DeployAzureVpnGateway ? $true : $false)
             azureFirewallSku = $AzureFirewallSku
             bastionSku = $AzureBastionSku
+            allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
         } `
         -ActionOnUnmanage "DeleteAll" `
         -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
@@ -353,6 +365,7 @@ function New-PBHubVirtualNetwork {
     return $virtualNetwork
 
 }
+
 function New-PBSpokeVirtualNetwork {
     param (
         [Parameter(ParameterSetName = "Default", Mandatory = $true)]
@@ -390,6 +403,7 @@ function New-PBSpokeVirtualNetwork {
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$AcceptOverlappingIpAddresses
+
     )
 
     #Input validation
@@ -423,6 +437,9 @@ function New-PBSpokeVirtualNetwork {
             throw "Error: $_"
         }
     }
+
+    $Tags.add("Environment", $Environment)
+    $Tags.add("CreatedWith", "PowerBicep")
 
     Write-Verbose "Checking for Hub VNet in location '$Location'"
 
@@ -579,6 +596,9 @@ function New-PBIsolatedVirtualNetwork {
         }
     }
     
+    $Tags.add("Environment", $Environment)
+    $Tags.add("CreatedWith", "PowerBicep")
+
     Write-Verbose "Creating Resource Group '$resourceGroupName'"
     $resourceGroup = New-AzSubscriptionDeployment `
         -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
