@@ -490,6 +490,7 @@ function New-PBSpokeVirtualNetwork {
                 tags = $Tags
                 subnets = $subnetsObjectArray
                 nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
+                azureFirewallPrivateIP = $hubVnet.tags.AzFirewallPrivateIp ? $hubVnet.tags.AzFirewallPrivateIp : ''
                 dnsServers = ($CustomDnsServers -ne @()) ? $CustomDnsServers : ($firewall.properties.sku.tier -ne "Basic" -and $hubVnet.tags.AzFirewall -eq "True") ? @($hubVnet.tags.AzFirewallPrivateIp) : @()
                 hubVnetId = $hubVnet.id
                 hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
@@ -509,6 +510,7 @@ function New-PBSpokeVirtualNetwork {
                 tags = $Tags
                 subnets = $subnetsObjectArray
                 nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
+                azureFirewallPrivateIP = $hubVnet.tags.AzFirewallPrivateIp ? $hubVnet.tags.AzFirewallPrivateIp : ''
                 hubVnetId = $hubVnet.id
                 hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
             } `
