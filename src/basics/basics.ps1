@@ -24,11 +24,11 @@ function New-PBResourceGroupName {
 
     $ResourceType = "Microsoft.Resources/resourceGroups"
 
-    $resourceNameShortcuts = Get-Content -Path "../lib/resourceNameShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $resourceNameShortcuts = Get-Content -Path "./lib/resourceNameShortcuts.json" | ConvertFrom-Json -AsHashtable
 
     $resourceNameShort = $resourceNameShortcuts.$ResourceType
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShortcutList = Get-Content -Path "./lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     $locationShort = $locationShortcutList.$Location
 
     if ($NetworkResourceGroup) {
@@ -52,11 +52,11 @@ function New-PBResourceName {
 
     $subscriptionId = (Get-AzContext).Subscription.Id
 
-    $resourceNameShortcuts = Get-Content -Path "../lib/resourceNameShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $resourceNameShortcuts = Get-Content -Path "./lib/resourceNameShortcuts.json" | ConvertFrom-Json -AsHashtable
 
     $resourceNameShort = $resourceNameShortcuts.$ResourceType
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShortcutList = Get-Content -Path "./lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     $locationShort = $locationShortcutList.$Location
 
     if ($resourceNameShort -eq "st") {

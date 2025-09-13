@@ -22,6 +22,7 @@ param deployAzureVpnGateway bool
 var bastionNsgName = 'nsg-AzureBastionSubnet-${name}'
 var bastionPublicIpName = 'pip-bastion-${name}'
 var bastionName = 'bastion-${name}'
+var bastionSubnetId = resourceId('Microsoft.Network/virtualNetworks/subnets', name, 'AzureBastionSubnet')
 
 resource bastionNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-07-01' = {
   name: bastionNsgName
@@ -162,7 +163,7 @@ resource bastionNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@20
   }
 }
 
-resource virtualNetwork 'Microsoft.Network/virtualNetworks@2019-11-01' = {
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-07-01' = {
   name: name
   location: location
   tags: tags
@@ -184,42 +185,42 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2019-11-01' = {
   }
 }
 
-// resource publicIpBastion 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployAzureBastion) {
-//   name: bastionPublicIpName
-//   location: location
-//   sku: {
-//     name: 'Standard'
-//   }
-//   properties: {
-//     publicIPAllocationMethod: 'Static'
-//     idleTimeoutInMinutes: 4
-//     // dnsSettings: {
-//     //   domainNameLabel: 'bastion-${name}-${uniqueString(resourceGroup().id)}'
-//     // }
-//   }
-// }
+resource publicIpBastion 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployAzureBastion) {
+  name: bastionPublicIpName
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    idleTimeoutInMinutes: 4
+  }
+}
 
-// resource bastionHost 'Microsoft.Network/bastionHosts@2024-07-01' =  if (deployAzureBastion)  {
-//   name: bastionName
-//   location: location
-//   tags: tags
-//   sku: {
-//     name: bastionSku
-//   }
-//   properties: {
-//     ipConfigurations: [{
-//       name: 'bastionIpConfig'
-//       properties: {
-//         subnet: {
-//           id: virtualNetwork.properties.subnets[0].id
-//         }
-//         publicIPAddress: {
-//           id: publicIpBastion.id
-//         }
-//       }
-//     }]
-//   }
-// }
+resource bastionHost 'Microsoft.Network/bastionHosts@2024-07-01' =  if (deployAzureBastion)  {
+  name: bastionName
+  location: location
+  tags: tags
+  sku: {
+    name: bastionSku
+  }
+  properties: {
+    ipConfigurations: [{
+      name: 'bastionIpConfig'
+      properties: {
+        subnet: {
+          id: bastionSubnetId
+        }
+        publicIPAddress: {
+          id: publicIpBastion.id
+        }
+      }
+    }]
+  }
+  dependsOn: [
+    bastionNetworkSecurityGroup
+  ]
+}
 
 output id string = virtualNetwork.id
 output name string = virtualNetwork.name

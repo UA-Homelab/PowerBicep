@@ -208,8 +208,8 @@ function New-PBHubVirtualNetwork {
     $global:usedRanges = [System.Collections.ArrayList]@()
     $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
-    
+    $locationShortcutList = Get-Content -Path "./lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+
     $locationShort = $locationShortcutList.$Location
 
     $virtualNetworkName = New-PBResourceName -ResourceType "Microsoft.Network/virtualNetworks" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
@@ -301,7 +301,7 @@ function New-PBHubVirtualNetwork {
     $resourceGroup = New-AzSubscriptionDeployment `
         -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
         -Location $Location `
-        -TemplateFile "./resourceContainer/resource_group.bicep" `
+        -TemplateFile "./src/resourceContainer/resource_group.bicep" `
         -TemplateParameterObject @{
             name = $resourceGroupName
             location = $Location
@@ -312,7 +312,7 @@ function New-PBHubVirtualNetwork {
     $virtualNetwork = New-AzResourceGroupDeploymentStack `
         -ResourceGroupName $resourceGroup.Outputs.name.value `
         -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./network/bicep/hub_vnet.bicep" `
+        -TemplateFile "./src/network/bicep/hub_vnet.bicep" `
         -TemplateParameterObject @{
             location = $Location
             name = $virtualNetworkName
@@ -333,7 +333,7 @@ function New-PBHubVirtualNetwork {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
         -ResourceGroupName $resourceGroup.Outputs.name.value `
         -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./network/hub_vnet.bicep" `
+        -TemplateFile "./src/network/hub_vnet.bicep" `
         -TemplateParameterObject @{
             location = $Location
             name = $virtualNetworkName
@@ -408,7 +408,7 @@ function New-PBSpokeVirtualNetwork {
     $global:usedRanges = [System.Collections.ArrayList]@()
     $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShortcutList = Get-Content -Path "lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     
     $locationShort = $locationShortcutList.$Location
 
@@ -438,7 +438,7 @@ function New-PBSpokeVirtualNetwork {
     $resourceGroup = New-AzSubscriptionDeployment `
         -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
         -Location $Location `
-        -TemplateFile "./resourceContainer/resource_group.bicep" `
+        -TemplateFile "./src/resourceContainer/resource_group.bicep" `
         -TemplateParameterObject @{
             name = $resourceGroupName
             location = $Location
@@ -469,7 +469,7 @@ function New-PBSpokeVirtualNetwork {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
             -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./network/bicep/spoke_vnet.bicep" `
+            -TemplateFile "./src/network/bicep/spoke_vnet.bicep" `
             -TemplateParameterObject @{
                 location = $Location
                 name = $virtualNetworkName
@@ -487,7 +487,7 @@ function New-PBSpokeVirtualNetwork {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
             -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./network/bicep/spoke_vnet.bicep" `
+            -TemplateFile "./src/network/bicep/spoke_vnet.bicep" `
             -TemplateParameterObject @{
                 location = $Location
                 name = $virtualNetworkName
@@ -563,7 +563,7 @@ function New-PBIsolatedVirtualNetwork {
     $global:usedRanges = [System.Collections.ArrayList]@()
     $global:availableCIDRs.Add($global:vnetAddressPrefix) | Out-Null
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShortcutList = Get-Content -Path "lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     
     $locationShort = $locationShortcutList.$Location
 

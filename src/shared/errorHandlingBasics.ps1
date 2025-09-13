@@ -3,7 +3,7 @@ function Test-LocationName {
         [string]$Location
     )
 
-    $locationShortcutList = Get-Content -Path "../lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShortcutList = Get-Content -Path "./lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
     if ($null -eq $locationShortcutList.$Location) {
         throw "Location '$Location' is not recognized. Please use a valid Azure region name."
     }
