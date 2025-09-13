@@ -9,7 +9,8 @@ param nextHopType string = 'VirtualAppliance'
 param nextHopDefaultRouteIP string
 param customRoutes object[] = []
 param hubVnetId string = ''
-param hubHasVpnGateway bool 
+param hubHasVpnGateway bool
+param dnsServers array = []
 
 var hubResourceGroup = length(split(hubVnetId, '/')) >= 5 ? split(hubVnetId, '/')[4] : ''
 var hubSubscriptionId = length(split(hubVnetId, '/')) >= 3 ? split(hubVnetId, '/')[2] : ''
@@ -92,6 +93,9 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2019-11-01' = {
   location: location
   tags: tags
   properties: {
+    dhcpOptions: {
+      dnsServers: dnsServers
+    }
     addressSpace: {
       addressPrefixes: [addressPrefix]
     }
@@ -99,9 +103,9 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2019-11-01' = {
       name: subnet.name
       properties: {
         addressPrefix: subnet.addressPrefix
-        routeTable: {
+        routeTable: (createRouteTable) ? {
           id: routeTable.id
-        }
+        } : null
         networkSecurityGroup: {
           id: networkSecurityGroup.id
         }
@@ -147,9 +151,12 @@ output resourceGroupName string = resourceGroup().name
 output subscriptionId string = subscription().id
 output tags object = virtualNetwork.tags
 output subnets array = virtualNetwork.properties.subnets
-output routeTable object = {
-  id: routeTable.id
-  name: routeTable.name
-  location: routeTable.location
-  tags: routeTable.tags
-}
+output routeTableId string = createRouteTable ? routeTable.id : ''
+output routeTableName string = createRouteTable ? routeTable.name : ''
+output networkSecurityGroupId string = networkSecurityGroup.id
+output networkSecurityGroupName string = networkSecurityGroup.name
+output natGatewayId string = !createRouteTable ? natGateway.id : ''
+output natGatewayName string = !createRouteTable ? natGateway.name : ''
+output publicIpNatGatewayId string = !createRouteTable ? publicIpNatGateway.id : ''
+output publicIpNatGatewayName string = !createRouteTable ? publicIpNatGateway.name : ''
+

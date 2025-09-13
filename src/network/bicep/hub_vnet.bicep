@@ -12,6 +12,7 @@ param allowOutboundInternetAccess bool
 param natRuleCollections array = []
 param networkRuleCollections array = []
 param applicationRuleCollections array = []
+param customDnsServers array = []
 
 param deployAzureBastion bool
 @allowed([
@@ -20,8 +21,7 @@ param deployAzureBastion bool
   'Premium'
 ])
 param bastionSku string = 'Standard'
-param deployEntraPrivateAccess bool
-param deployAzureVpnGateway bool
+// param deployAzureVpnGateway bool
 
 var bastionNsgName = 'nsg-AzureBastionSubnet-${name}'
 var bastionName = 'bastion-${name}'
@@ -335,6 +335,10 @@ resource firewallPolicy 'Microsoft.Network/firewallPolicies@2021-05-01' = if (de
   name: azureFirewallPolicyName
   location: location
   properties: {
+    dnsSettings: (azureFirewallSku == 'Premium' || azureFirewallSku == 'Standard') ? {
+      enableProxy: true
+      servers: (customDnsServers != []) ? customDnsServers : ['168.63.129.16']
+    } : {}
     sku: {
       tier: azureFirewallSku
     }
@@ -353,6 +357,9 @@ resource natRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollecti
 resource networkRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2022-01-01' = if (deployAzureFirewall) {
   parent: firewallPolicy
   name: 'DefaultNetworkRuleCollectionGroup'
+  dependsOn: [
+    natRuleCollectionGroup
+  ]
   properties: {
     priority: 300
     ruleCollections: azureFirewallNetworkRuleCollections

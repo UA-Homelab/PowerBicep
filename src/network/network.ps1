@@ -184,7 +184,7 @@ function New-PBHubVirtualNetwork {
 
         [ValidateSet("Basic", "Standard", "Premium")]
         [Parameter(ParameterSetName = "Default")]
-        [string]$AzureFirewallSku,
+        [string]$AzureFirewallSku = "Basic",
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$AzureFirewallAllowOutboundInternetAccess,
@@ -194,7 +194,7 @@ function New-PBHubVirtualNetwork {
 
         [ValidateSet("Basic", "Standard", "Premium")]
         [Parameter(ParameterSetName = "Default")]
-        [string]$AzureBastionSku,
+        [string]$AzureBastionSku = "Basic",
 
         [Parameter(ParameterSetName = "Default")]
         [switch]$DeployEntraPrivateAccess,
@@ -243,22 +243,12 @@ function New-PBHubVirtualNetwork {
     $Tags.add("CreatedWith", "PowerBicep")
 
     [hashtable]$subnets = @{}
-    if ($DeployAzureFirewall) {
-        $subnets.Add("AzureFirewallSubnet", 26)
-        $subnets.Add("AzureFirewallManagementSubnet", 26)
-    }
+    
+    $subnets.Add("AzureFirewallSubnet", 26)
+    $subnets.Add("AzureFirewallManagementSubnet", 26)
+    $subnets.Add("AzureBastionSubnet", 26)
+    $subnets.Add("GatewaySubnet", 27)
 
-    if ($DeployAzureBastion) {
-        $subnets.Add("AzureBastionSubnet", 26)
-    }
-
-    if ($DeployEntraPrivateAccess) {
-        $subnets.Add("EntraPrivateAccessSubnet", 27)
-    }
-
-    if ($DeployAzureVpnGateway) {
-        $subnets.Add("GatewaySubnet", 27)
-    }
 
     [array]$subnetsObjectArray = @()
 
@@ -331,8 +321,6 @@ function New-PBHubVirtualNetwork {
             subnets = $subnetsObjectArray
             deployAzureFirewall = ($DeployAzureFirewall ? $true : $false)
             deployAzureBastion = ($DeployAzureBastion ? $true : $false)
-            deployEntraPrivateAccess = ($DeployEntraPrivateAccess ? $true : $false)
-            deployAzureVpnGateway = ($DeployAzureVpnGateway ? $true : $false)
             azureFirewallSku = $AzureFirewallSku
             bastionSku = $AzureBastionSku
             allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
@@ -353,8 +341,6 @@ function New-PBHubVirtualNetwork {
             subnets = $subnetsObjectArray
             deployAzureFirewall = ($DeployAzureFirewall ? $true : $false)
             deployAzureBastion = ($DeployAzureBastion ? $true : $false)
-            deployEntraPrivateAccess = ($DeployEntraPrivateAccess ? $true : $false)
-            deployAzureVpnGateway = ($DeployAzureVpnGateway ? $true : $false)
             azureFirewallSku = $AzureFirewallSku
             bastionSku = $AzureBastionSku
             allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
@@ -402,7 +388,10 @@ function New-PBSpokeVirtualNetwork {
         [switch]$Force,
 
         [Parameter(ParameterSetName = "Default")]
-        [switch]$AcceptOverlappingIpAddresses
+        [switch]$AcceptOverlappingIpAddresses,
+
+        [Parameter(ParameterSetName = "Default")]
+        [array]$CustomDnsServers = @()
 
     )
 
@@ -444,11 +433,18 @@ function New-PBSpokeVirtualNetwork {
     Write-Verbose "Checking for Hub VNet in location '$Location'"
 
     $hubVnet = Search-AzGraph -Query "resources
+        | where type == 'microsoft.network/virtualnetworks'
         | where tags.HubVNET == 'True'
         | where location == '$Location'"
 
-    if ($hubVnet.location -eq $null) {
+    if ($null -eq $hubVnet.location) {
         throw "No Hub network found in location '$Location'. Please deploy a Hub network first using 'New-PBHubNetwork' and retry the deployment."
+    }
+
+    if ($hubVnet.tags.AzFirewall -eq "True") {
+        $firewall = Search-AzGraph -Query "resources
+            | where type == 'microsoft.network/azurefirewalls'
+            | where resourceGroup  == '$($hubVnet.resourceGroup)'"
     }
 
     Write-Verbose "Creating Resource Group '$resourceGroupName'"
@@ -493,7 +489,8 @@ function New-PBSpokeVirtualNetwork {
                 addressPrefix = $AddressPrefix
                 tags = $Tags
                 subnets = $subnetsObjectArray
-                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : $nextHopDefaultRouteIP
+                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
+                dnsServers = ($CustomDnsServers -ne @()) ? $CustomDnsServers : ($firewall.properties.sku.tier -ne "Basic" -and $hubVnet.tags.AzFirewall -eq "True") ? @($hubVnet.tags.AzFirewallPrivateIp) : @()
                 hubVnetId = $hubVnet.id
                 hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
             } `
@@ -511,7 +508,7 @@ function New-PBSpokeVirtualNetwork {
                 addressPrefix = $AddressPrefix
                 tags = $Tags
                 subnets = $subnetsObjectArray
-                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : $nextHopDefaultRouteIP
+                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
                 hubVnetId = $hubVnet.id
                 hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
             } `

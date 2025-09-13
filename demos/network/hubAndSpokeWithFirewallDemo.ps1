@@ -16,12 +16,14 @@ $spokeVnet1Subnets = @{
     snet2 = 27
 }
 
-$spokeVnet2SubscriptionId = "643c55c2-e49d-4895-bf82-54276b60839e"
+$spokeVnet2SubscriptionId = "025c998e-1f39-4344-89a5-4340c65b11bb"
 $spokeVnet2AddressPrefix = "192.168.2.0/24"
 $spokeVnet2ApplicationNameShort = "AppTwo"
 $spokeVnet2Subnets = @{
-    snet1 = 26
+    snet1 = 28
     snet2 = 27
+    snet3 = 26
+    snet4 = 28
 }
 
 Connect-AzAccount
@@ -33,11 +35,11 @@ $hubVnet = New-PBHubVirtualNetwork `
     -Location $location `
     -AddressPrefix $hubVnetAddressPrefix `
     -DeployAzureFirewall `
-    -AzureFirewallSku 'Basic' `
+    -AzureFirewallSku 'Standard' `
     -DeployAzureBastion `
-    -AzureBastionSku 'Basic' `
+    -AzureBastionSku 'Standard' `
     -AzureFirewallAllowOutboundInternetAccess `
-    -Force #-Verbose
+    -Force
 
 Set-AzContext -Subscription $spokeVnet1SubscriptionId
 
@@ -47,7 +49,7 @@ $spokeVnet1 = New-PBSpokeVirtualNetwork `
     -AddressPrefix $spokeVnet1AddressPrefix `
     -ApplicationNameShort $spokeVnet1ApplicationNameShort `
     -Subnets $spokeVnet1Subnets `
-    -Force #-Verbose
+    -Force
 
 Set-AzContext -Subscription $spokeVnet2SubscriptionId
 
@@ -57,4 +59,4 @@ $spokeVnet2 = New-PBSpokeVirtualNetwork `
     -AddressPrefix $spokeVnet2AddressPrefix `
     -ApplicationNameShort $spokeVnet2ApplicationNameShort `
     -Subnets $spokeVnet2Subnets `
-    -Force #-Verbose
+    -Force -Verbose

@@ -21,7 +21,8 @@ This module enables you to leverage the advantages of deploying your infrastruct
 - [See Also](#see-also)
 
 ## Advantages
-|                      |                 |
+
+| Advantage                     | Description                 |
 |-----------------------------------|-------------------------------------------------------------------------------------------|
 | Simplicity        | Deploy complex Azure infrastructure using simple PowerShell commands.                                                |
 | Comply with Microsoft best practices    | All templates are designed according to Microsoft best practices, using the Well-Architected Framework.              |
@@ -34,15 +35,22 @@ This module enables you to leverage the advantages of deploying your infrastruct
 ## Prerequisities
 - Azure PowerShell must be installed on your system. Please follow [these instructions](https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell?view=azps-14.4.0) to install it.
 - Bicep CLI must be installed on your system. Please follow [these instructions](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/install) to install it.
-- Download or clone this repository to your device
+- Git is recommended to be installed on your system. Please follow [these instructions](https://github.com/git-guides/install-git)
+
+    > ℹ️ **Note:**  
+    > If git cannot be installed, you can download the code from this repository as a ZIP file and extract it to the target location.
 
 ## Instructions
 
-1. Open PowerShell and navigate to the location of this repository on your local computer
+1. Open PowerShell and navigate to the location you want to clone this repository to
     ```powershell
-    cd <path to the downloaded PowerBicep folder>
+    cd <path to the target folder>
     ```
-2. Import the module
+1. Clone this repository on your local device
+    ```powershell
+    git clone "https://github.com/UA-Homelab/PowerBicep.git" .
+    ```
+1. Import the module
 
     ```powershell
     Import-Module ./PowerBicep.psm1
@@ -178,6 +186,7 @@ New-PBSpokeVirtualNetwork
     [-Force]
     [-AcceptOverlappingIpAddresses]
     [-HubNetworkLocation <string>]
+    [-CustomDnsServers <array>]
 ```
 
 
@@ -197,6 +206,10 @@ New-PBSpokeVirtualNetwork
 | Force                       | switch    | Forces deployment using deployment stack.                                                    | No       |                 |
 | AcceptOverlappingIpAddresses| switch    | Allow the virtual networks address space to overlap with other virtual networks. <span style="color:red">**This will cause issues, if the overlapping network is already peered with the hub or if you decide to peer it in the future!**</span>                           | No       |                 |
 | HubNetworkLocation          | string    | Location of the hub network if no hub is available in the spoke subnets region.                                        | No       |                 |
+| CustomDnsServers          | array    | The IPs of custom DNS servers, the spoke should use.                                            | No       | @()                |
+
+> ℹ️ **Note:**  
+> If no custom dns servers are defined and the hub was deployed with an Azure Firewall (Standard or Premium SKU), the firewall is used as DNS proxy and will forward requests to the Azure default DNS servers.  <br><br> This enables central management of Private DNS Zones, linking them to the hub network and resolving private endpoints through Azure firewall. <br><br>If you created a site-to-site VPN between Azure and your on-premises network, you can also configure conditional forwarders on your local DNS servers, pointing to the private IP of the Azure Firewall, to resolve private endpoints from your local devices.
 
 ### Examples
 
