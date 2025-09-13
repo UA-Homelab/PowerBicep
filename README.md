@@ -221,16 +221,5 @@ New-PBSpokeVirtualNetwork
     ```powershell
     New-PBSpokeVirtualNetwork -ApplicationNameShort 'app' -Environment 'dev' -Location 'westeurope' -AddressPrefix '192.168.0.0/24' -Subnets @{subnet1=26; subnet2=27} -HubNetworkLocation 'germanywestcentral'
     ```
-
-
-
-
-
 ---
 
-# See Also
-
-- [Microsoft PowerShell Documentation](https://docs.microsoft.com/powershell/)
-- [Azure PowerShell Reference](https://docs.microsoft.com/powershell/azure/)
-
----
