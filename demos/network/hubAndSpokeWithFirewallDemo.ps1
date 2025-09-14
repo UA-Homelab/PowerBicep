@@ -8,8 +8,12 @@ $environment = "dev"
 $hubSubscriptionId = "025c998e-1f39-4344-89a5-4340c65b11bb"
 $hubVnetAddressPrefix = "192.168.0.0/24"
 
+$hubVnet2SubscriptionId = "025c998e-1f39-4344-89a5-4340c65b11bb"
+$hubVnet2AddressPrefix = "192.168.1.0/24"
+$hubVnet2Location = "northeurope"
+
 $spokeVnet1SubscriptionId = "643c55c2-e49d-4895-bf82-54276b60839e"
-$spokeVnet1AddressPrefix = "192.168.1.0/24"
+$spokeVnet1AddressPrefix = "192.168.10.0/24"
 $spokeVnet1ApplicationNameShort = "AppOne"
 $spokeVnet1Subnets = @{
     snet1 = 26
@@ -17,7 +21,7 @@ $spokeVnet1Subnets = @{
 }
 
 $spokeVnet2SubscriptionId = "025c998e-1f39-4344-89a5-4340c65b11bb"
-$spokeVnet2AddressPrefix = "192.168.2.0/24"
+$spokeVnet2AddressPrefix = "192.168.20.0/24"
 $spokeVnet2ApplicationNameShort = "AppTwo"
 $spokeVnet2Subnets = @{
     snet1 = 28
@@ -38,6 +42,15 @@ $hubVnet = New-PBHubVirtualNetwork `
     -AzureFirewallSku 'Standard' `
     -DeployAzureBastion `
     -AzureBastionSku 'Standard' `
+    -AzureFirewallAllowOutboundInternetAccess `
+    -Force
+
+Set-AzContext -Subscription $hubVnet2SubscriptionId
+
+$hubVnet2 = New-PBHubVirtualNetwork `
+    -Environment $environment `
+    -Location $hubVnet2Location `
+    -AddressPrefix $hubVnet2AddressPrefix `
     -AzureFirewallAllowOutboundInternetAccess `
     -Force
 

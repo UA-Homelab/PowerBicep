@@ -6,6 +6,11 @@ $global:vnetAddressPrefix = ""
 $global:availableCIDRs = [System.Collections.ArrayList]@()
 $global:usedRanges = [System.Collections.ArrayList]@()
 $global:removedExistingSubnets = $false
+$global:resourceGroupBicepTemplatePath = "./src/resourceContainer/bicep/resource_group.bicep"
+$global:hubVnetBicepTemplatePath = "./src/network/bicep/hub_vnet.bicep"
+$global:spokeVnetBicepTemplatePath = "./src/network/bicep/spoke_vnet.bicep"
+$global:privateDnsZonesBicepTemplatePath = "./src/network/bicep/private_dns_zones.bicep"
+$global:isolatedVnetBicepTemplatePath = "./src/network/bicep/isolated_vnet.bicep"
 
 function IpIntToString($ipInt) {
     $bytes = [BitConverter]::GetBytes([uint32]$ipInt)
@@ -225,10 +230,6 @@ function New-PBHubVirtualNetwork {
     $resourceGroupName = New-PBResourceName -ResourceType "Microsoft.Resources/resourceGroups" -NamingConventionOption $NamingConventionOption -ApplicationNameShort $ApplicationNameShort -Environment $Environment -Location $Location -Index $Index
 
     Write-Verbose "Checking for overlapping VNets with Address Prefix '$AddressPrefix'"
-    $overlappingVirtualNetworks = Search-AzGraph -Query "resources
-        | where type == 'microsoft.network/virtualnetworks'
-        | where name != '$virtualNetworkName'
-        | where properties.addressSpace.addressPrefixes contains '$AddressPrefix'"
 
     if (-not $AcceptOverlappingIpAddresses) {
         try {
@@ -298,53 +299,47 @@ function New-PBHubVirtualNetwork {
         $Tags.add("EntraPrivateAccess", "True")
     }
     
+    $resourceGroupDeploymentName = "Deploy-$ApplicationNameShort-Network-RG-$($locationShort.toUpper())"
+
     $resourceGroup = New-AzSubscriptionDeployment `
-        -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
+        -Name $resourceGroupDeploymentName `
         -Location $Location `
-        -TemplateFile "./src/resourceContainer/resource_group.bicep" `
+        -TemplateFile $global:resourceGroupBicepTemplatePath `
         -TemplateParameterObject @{
             name = $resourceGroupName
             location = $Location
             tags = $Tags
         }
     
+    $vnetDeploymentName = "Deploy-$ApplicationNameShort-VNET-$($locationShort.toUpper())"
+    $vnetDeploymentParameters = @{
+        location = $Location
+        name = $virtualNetworkName
+        addressPrefix = $AddressPrefix
+        tags = $Tags
+        subnets = $subnetsObjectArray
+        deployAzureFirewall = ($DeployAzureFirewall ? $true : $false)
+        deployAzureBastion = ($DeployAzureBastion ? $true : $false)
+        azureFirewallSku = $AzureFirewallSku
+        bastionSku = $AzureBastionSku
+        allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
+    }
+    
     if ($Force) {
     $virtualNetwork = New-AzResourceGroupDeploymentStack `
         -ResourceGroupName $resourceGroup.Outputs.name.value `
-        -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./src/network/bicep/hub_vnet.bicep" `
-        -TemplateParameterObject @{
-            location = $Location
-            name = $virtualNetworkName
-            addressPrefix = $AddressPrefix
-            tags = $Tags
-            subnets = $subnetsObjectArray
-            deployAzureFirewall = ($DeployAzureFirewall ? $true : $false)
-            deployAzureBastion = ($DeployAzureBastion ? $true : $false)
-            azureFirewallSku = $AzureFirewallSku
-            bastionSku = $AzureBastionSku
-            allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
-        } `
+        -Name $vnetDeploymentName `
+        -TemplateFile $global:hubVnetBicepTemplatePath `
+        -TemplateParameterObject $vnetDeploymentParameters `
         -ActionOnUnmanage "DeleteAll" `
         -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
         -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
         -ResourceGroupName $resourceGroup.Outputs.name.value `
-        -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-        -TemplateFile "./src/network/hub_vnet.bicep" `
-        -TemplateParameterObject @{
-            location = $Location
-            name = $virtualNetworkName
-            addressPrefix = $AddressPrefix
-            tags = $Tags
-            subnets = $subnetsObjectArray
-            deployAzureFirewall = ($DeployAzureFirewall ? $true : $false)
-            deployAzureBastion = ($DeployAzureBastion ? $true : $false)
-            azureFirewallSku = $AzureFirewallSku
-            bastionSku = $AzureBastionSku
-            allowOutboundInternetAccess = ($AzureFirewallAllowOutboundInternetAccess ? $true : $false)
-        } `
+        -Name $vnetDeploymentName `
+        -TemplateFile $global:hubVnetBicepTemplatePath `
+        -TemplateParameterObject $vnetDeploymentParameters `
         -ActionOnUnmanage "DeleteAll" `
         -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
     }
@@ -447,11 +442,13 @@ function New-PBSpokeVirtualNetwork {
             | where resourceGroup  == '$($hubVnet.resourceGroup)'"
     }
 
+    $resourceGroupDeploymentName = "Deploy-$ApplicationNameShort-Network-RG-$($locationShort.toUpper())"
+
     Write-Verbose "Creating Resource Group '$resourceGroupName'"
     $resourceGroup = New-AzSubscriptionDeployment `
-        -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
+        -Name $resourceGroupDeploymentName `
         -Location $Location `
-        -TemplateFile "./src/resourceContainer/resource_group.bicep" `
+        -TemplateFile $global:resourceGroupBicepTemplatePath `
         -TemplateParameterObject @{
             name = $resourceGroupName
             location = $Location
@@ -477,43 +474,35 @@ function New-PBSpokeVirtualNetwork {
 
         $subnetsObjectArray += $subnetObject
     }
-    
+    $vnetDeploymentName = "Deploy-$ApplicationNameShort-VNET-$($locationShort.toUpper())"
+    $vnetDeploymentParameters = @{
+        location = $Location
+        name = $virtualNetworkName
+        addressPrefix = $AddressPrefix
+        tags = $Tags
+        subnets = $subnetsObjectArray
+        nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
+        azureFirewallPrivateIP = $hubVnet.tags.AzFirewallPrivateIp ? $hubVnet.tags.AzFirewallPrivateIp : ''
+        dnsServers = ($CustomDnsServers -ne @()) ? $CustomDnsServers : ($firewall.properties.sku.tier -ne "Basic" -and $hubVnet.tags.AzFirewall -eq "True") ? @($hubVnet.tags.AzFirewallPrivateIp) : @()
+        hubVnetId = $hubVnet.id
+        hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
+    }
+
     if ($Force) {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
-            -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./src/network/bicep/spoke_vnet.bicep" `
-            -TemplateParameterObject @{
-                location = $Location
-                name = $virtualNetworkName
-                addressPrefix = $AddressPrefix
-                tags = $Tags
-                subnets = $subnetsObjectArray
-                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
-                azureFirewallPrivateIP = $hubVnet.tags.AzFirewallPrivateIp ? $hubVnet.tags.AzFirewallPrivateIp : ''
-                dnsServers = ($CustomDnsServers -ne @()) ? $CustomDnsServers : ($firewall.properties.sku.tier -ne "Basic" -and $hubVnet.tags.AzFirewall -eq "True") ? @($hubVnet.tags.AzFirewallPrivateIp) : @()
-                hubVnetId = $hubVnet.id
-                hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
-            } `
+            -Name $vnetDeploymentName `
+            -TemplateFile $global:spokeVnetBicepTemplatePath `
+            -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
             -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
-            -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./src/network/bicep/spoke_vnet.bicep" `
-            -TemplateParameterObject @{
-                location = $Location
-                name = $virtualNetworkName
-                addressPrefix = $AddressPrefix
-                tags = $Tags
-                subnets = $subnetsObjectArray
-                nextHopDefaultRouteIP = $hubVnet.tags.AzFirewall -eq "True" ? $hubVnet.tags.AzFirewallPrivateIp : ''
-                azureFirewallPrivateIP = $hubVnet.tags.AzFirewallPrivateIp ? $hubVnet.tags.AzFirewallPrivateIp : ''
-                hubVnetId = $hubVnet.id
-                hubHasVpnGateway = ($hubVnet.tags.VpnGateway -eq "True" ? $true : $false)
-            } `
+            -Name $vnetDeploymentName `
+            -TemplateFile $global:spokeVnetBicepTemplatePath `
+            -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
     }
@@ -598,11 +587,13 @@ function New-PBIsolatedVirtualNetwork {
     $Tags.add("Environment", $Environment)
     $Tags.add("CreatedWith", "PowerBicep")
 
+    $resourceGroupDeploymentName = "Deploy-$ApplicationNameShort-Network-RG-$($locationShort.toUpper())"
+
     Write-Verbose "Creating Resource Group '$resourceGroupName'"
     $resourceGroup = New-AzSubscriptionDeployment `
-        -Name "Deploy-$ApplicationNameShort-Network-RG-$locationShort" `
+        -Name $resourceGroupDeploymentName `
         -Location $Location `
-        -TemplateFile "./resourceContainer/resource_group.bicep" `
+        -TemplateFile $global:resourceGroupBicepTemplatePath `
         -TemplateParameterObject @{
             name = $resourceGroupName
             location = $Location
@@ -628,34 +619,31 @@ function New-PBIsolatedVirtualNetwork {
 
         $subnetsObjectArray += $subnetObject
     }
-    
+
+    $vnetDeploymentName = "Deploy-$ApplicationNameShort-VNET-$($locationShort.toUpper())"
+    $vnetDeploymentParameters = @{
+        location = $Location
+        name = $virtualNetworkName
+        addressPrefix = $AddressPrefix
+        tags = $Tags
+        subnets = $subnetsObjectArray
+    }
+
     if ($Force) {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
-            -Name "deploy-$ApplicationNameShort-vnet-$locationShort" `
-            -TemplateFile "./network/bicep/isolated_vnet.bicep" `
-            -TemplateParameterObject @{
-                location = $Location
-                name = $virtualNetworkName
-                addressPrefix = $AddressPrefix
-                tags = $Tags
-                subnets = $subnetsObjectArray
-            } `
+            -Name $vnetDeploymentName `
+            -TemplateFile $global:isolatedVnetBicepTemplatePath `
+            -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
             -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
             -ResourceGroupName $resourceGroup.Outputs.name.value `
-            -Name "Deploy-$ApplicationNameShort-VNET-$locationShort" `
-            -TemplateFile "./network/bicep/isolated_vnet.bicep" `
-            -TemplateParameterObject @{
-                location = $Location
-                name = $virtualNetworkName
-                addressPrefix = $AddressPrefix
-                tags = $Tags
-                subnets = $subnetsObjectArray
-            } `
+            -Name $vnetDeploymentName `
+            -TemplateFile $global:isolatedVnetBicepTemplatePath `
+            -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
     }
@@ -664,4 +652,184 @@ function New-PBIsolatedVirtualNetwork {
 
     return $virtualNetworkPSObject
 
+}
+
+function New-PBPrivateDnsZone {
+    param (
+        [Parameter()]
+        [switch]$All,
+
+        [Parameter()]
+        [string[]]$CustomPrivateDnsZones,
+
+        [Parameter()]
+        [switch]$LinkToHub,
+
+        [Parameter()]
+        [string[]]$LinkedVirtualNetworkIds,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Environment,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Location,
+
+        [Parameter()]
+        [hashtable]$Tags = @{},
+
+        [Parameter()]
+        [string]$Index = "001",
+
+        [Parameter()]
+        [switch]$Force,
+
+        [Parameter()]
+        [switch]$DenyManualChanges,
+
+        [Parameter()]
+        [int]$NamingConventionOption = 1
+    )
+
+    $privateDnsZoneNames = @()
+    if ($All) {
+        $privateDnsZoneNames = @(
+                'privatelink.api.azureml.ms'
+                'privatelink.notebooks.azure.net'
+                'privatelink.cognitiveservices.azure.com'
+                'privatelink.openai.azure.com'
+                'privatelink.services.ai.azure.com'
+                'privatelink.directline.botframework.com'
+                'privatelink.token.botframework.com'
+                'privatelink.sql.azuresynapse.net'
+                'privatelink.dev.azuresynapse.net'
+                'privatelink.azuresynapse.net'
+                'privatelink.servicebus.windows.net'
+                'privatelink.datafactory.azure.net'
+                'privatelink.adf.azure.com'
+                'privatelink.azurehdinsight.net'
+                'privatelink.blob.core.windows.net'
+                'privatelink.queue.core.windows.net'
+                'privatelink.table.core.windows.net'
+                'privatelink.analysis.windows.net'
+                'privatelink.pbidedicated.windows.net'
+                'privatelink.tip1.powerquery.microsoft.com'
+                'privatelink.azuredatabricks.net'
+                'privatelink.batch.azure.com'
+                'privatelink-global.wvd.microsoft.com'
+                'privatelink.wvd.microsoft.com'
+                'privatelink.azurecr.io'
+                'privatelink.database.windows.net'
+                'privatelink.documents.azure.com'
+                'privatelink.mongo.cosmos.azure.com'
+                'privatelink.cassandra.cosmos.azure.com'
+                'privatelink.gremlin.cosmos.azure.com'
+                'privatelink.table.cosmos.azure.com'
+                'privatelink.analytics.cosmos.azure.com'
+                'privatelink.postgres.cosmos.azure.com'
+                'privatelink.postgres.database.azure.com'
+                'privatelink.mysql.database.azure.com'
+                'privatelink.mariadb.database.azure.com'
+                'privatelink.redis.cache.windows.net'
+                'privatelink.redisenterprise.cache.azure.net'
+                'privatelink.redis.azure.net'
+                'privatelink.his.arc.azure.com'
+                'privatelink.guestconfiguration.azure.com'
+                'privatelink.dp.kubernetesconfiguration.azure.com'
+                'privatelink.eventgrid.azure.net'
+                'privatelink.ts.eventgrid.azure.net'
+                'privatelink.azure-api.net'
+                'privatelink.azurehealthcareapis.com'
+                'privatelink.dicom.azurehealthcareapis.com'
+                'privatelink.azure-devices.net'
+                'privatelink.azure-devices-provisioning.net'
+                'privatelink.api.adu.microsoft.com'
+                'privatelink.azureiotcentral.com'
+                'privatelink.digitaltwins.azure.net'
+                'privatelink.media.azure.net'
+                'privatelink.azure-automation.net'
+                'privatelink.monitor.azure.com'
+                'privatelink.oms.opinsights.azure.com'
+                'privatelink.ods.opinsights.azure.com'
+                'privatelink.agentsvc.azure-automation.net'
+                'privatelink.purview.azure.com'
+                'privatelink.purviewstudio.azure.com'
+                'privatelink.purview-service.microsoft.com'
+                'privatelink.prod.migration.windowsazure.com'
+                'privatelink.azure.com'
+                'privatelink.grafana.azure.com'
+                'privatelink.vaultcore.azure.net'
+                'privatelink.managedhsm.azure.net'
+                'privatelink.azconfig.io'
+                'privatelink.attest.azure.net'
+                'privatelink.file.core.windows.net'
+                'privatelink.web.core.windows.net'
+                'privatelink.dfs.core.windows.net'
+                'privatelink.afs.azure.net'
+                'privatelink.blob.storage.azure.net'
+                'privatelink.search.windows.net'
+                'privatelink.azurewebsites.net'
+                'scm.privatelink.azurewebsites.net'
+                'privatelink.service.signalr.net'
+                'privatelink.azurestaticapps.net'
+                'privatelink.webpubsub.azure.com'
+        )
+    } else {
+        $privateDnsZoneNames = $CustomPrivateDnsZones
+    }
+
+    if ($LinkToHub) {
+        Write-Verbose "Searching for Hub VNet in location '$Location'"
+
+        $hubVnets = Search-AzGraph -Query "resources
+            | where type == 'microsoft.network/virtualnetworks'
+            | where tags.HubVNET == 'True'"
+
+        $LinkedVirtualNetworkIds += $hubVnets.id
+    }
+
+    $Tags.add("Environment", $Environment)
+    $Tags.add("CreatedWith", "PowerBicep")
+
+    $resourceGroupName = New-PBResourceGroupName -NamingConventionOption $NamingConventionOption -ApplicationNameShort "dns" -Environment $Environment.toLower() -Location $Location -Index $Index
+
+    $locationShortcutList = Get-Content -Path "./lib/locationsShortcuts.json" | ConvertFrom-Json -AsHashtable
+    $locationShort = $locationShortcutList.$Location
+
+    $resourceGroupDeploymentName = "Deploy-PrivateDnsZones-RG-$($locationShort.toUpper())"
+
+    $resourceGroup = New-AzSubscriptionDeployment `
+        -Name $resourceGroupDeploymentName `
+        -Location $Location `
+        -TemplateFile $global:resourceGroupBicepTemplatePath `
+        -TemplateParameterObject @{
+            name = $resourceGroupName
+            location = $Location
+            tags = $Tags
+        }
+
+    $privateDnsZonesDeploymentName = "Deploy-PrivateDnsZones-$($locationShort.toUpper())"
+    $privateDnsZonesParameters = @{
+        privateDnsZoneNames = $privateDnsZoneNames
+        tags = $Tags
+        linkedVirtualNetworkIds = $LinkedVirtualNetworkIds
+    }
+        
+    if ($Force) {
+        New-AzResourceGroupDeploymentStack `
+            -Name $privateDnsZonesDeploymentName `
+            -ResourceGroupName $resourceGroup.Outputs.name.value `
+            -TemplateFile $global:privateDnsZonesBicepTemplatePath `
+            -TemplateParameterObject $privateDnsZonesParameters `
+            -ActionOnUnmanage "DeleteAll" `
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -Force
+    } else {
+        New-AzResourceGroupDeploymentStack `
+            -Name $privateDnsZonesDeploymentName `
+            -ResourceGroupName $resourceGroup.Outputs.name.value `
+            -TemplateFile $global:privateDnsZonesBicepTemplatePath `
+            -TemplateParameterObject $privateDnsZonesParameters `
+            -ActionOnUnmanage "DeleteAll" `
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+    }
 }
