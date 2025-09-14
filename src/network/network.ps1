@@ -333,6 +333,7 @@ function New-PBHubVirtualNetwork {
         -TemplateParameterObject $vnetDeploymentParameters `
         -ActionOnUnmanage "DeleteAll" `
         -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+        -DenySettingsApplyToChildScopes `
         -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
@@ -341,7 +342,8 @@ function New-PBHubVirtualNetwork {
         -TemplateFile $global:hubVnetBicepTemplatePath `
         -TemplateParameterObject $vnetDeploymentParameters `
         -ActionOnUnmanage "DeleteAll" `
-        -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+        -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+        -DenySettingsApplyToChildScopes
     }
     return $virtualNetwork
 
@@ -496,6 +498,7 @@ function New-PBSpokeVirtualNetwork {
             -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes `
             -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
@@ -504,7 +507,8 @@ function New-PBSpokeVirtualNetwork {
             -TemplateFile $global:spokeVnetBicepTemplatePath `
             -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
-            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes
     }
 
     $virtualNetworkPSObject = Get-AzVirtualNetwork -Name $virtualNetwork.Outputs.name.value -ResourceGroupName $resourceGroup.Outputs.name.value
@@ -637,6 +641,7 @@ function New-PBIsolatedVirtualNetwork {
             -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes `
             -Force
     } else {
         $virtualNetwork = New-AzResourceGroupDeploymentStack `
@@ -645,7 +650,8 @@ function New-PBIsolatedVirtualNetwork {
             -TemplateFile $global:isolatedVnetBicepTemplatePath `
             -TemplateParameterObject $vnetDeploymentParameters `
             -ActionOnUnmanage "DeleteAll" `
-            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes
     }
 
     $virtualNetworkPSObject = Get-AzVirtualNetwork -Name $virtualNetwork.Outputs.name.value -ResourceGroupName $resourceGroup.Outputs.name.value
@@ -822,6 +828,7 @@ function New-PBPrivateDnsZone {
             -TemplateParameterObject $privateDnsZonesParameters `
             -ActionOnUnmanage "DeleteAll" `
             -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes `
             -Force
     } else {
         New-AzResourceGroupDeploymentStack `
@@ -830,6 +837,7 @@ function New-PBPrivateDnsZone {
             -TemplateFile $global:privateDnsZonesBicepTemplatePath `
             -TemplateParameterObject $privateDnsZonesParameters `
             -ActionOnUnmanage "DeleteAll" `
-            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None")
+            -DenySettingsMode ($DenyManualChanges ? "DenyWriteAndDelete" : "None") `
+            -DenySettingsApplyToChildScopes
     }
 }
